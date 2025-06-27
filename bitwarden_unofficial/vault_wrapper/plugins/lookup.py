@@ -22,7 +22,7 @@ class BitwardenCliWrapper:
         # Explicitly clean up temporary directory
         self._tempdir_obj.cleanup()
 
-    def get_secret(self, bw_url:str, bw_client_id:str, bw_client_secret:str, bw_password:str, id:str, type:str):
+    def get_secret(self, bw_url:str, bw_client_id:str, bw_client_secret:str, bw_password:str, secret_id:str, secret_type:str):
         env = os.environ.copy()
         env['HOME'] = self._tmp_dir
         env['BW_CLIENTID'] = bw_client_id
@@ -56,7 +56,9 @@ class BitwardenCliWrapper:
         run(['bw', 'unlock', bw_password])
 
         # Step 5: Read secret value and return it
-        run(['bw', 'get', type, id])
+        # For example, the following command will create a secure note:
+        # bw get (item|username|password|uri|totp|exposed|attachment|folder|collection|organization|org-collection|template|fingerprint) <id> [options]
+        run(['bw', 'get', secret_type, secret_id])
         
 
 
@@ -86,18 +88,16 @@ class LookupModule(LookupBase):
     def run(self, terms, variables=None, **kwargs):
         if len(terms) != 2:
             raise AnsibleError("You must provide the type and the id to lookup")
-        type = terms[0]
+        secret_type = terms[0]
         if type not in LookupModule.ALLOWED_LOOKUP_TYPES:
             raise AnsibleError("You must provide a valid type between item|username|password|uri|totp|exposed|attachment|folder|collection|organization|org-collection|template|fingerprint")
-        id = terms[1]
-        # For example, the following command will create a secure note:
-        # bw get (item|username|password|uri|totp|exposed|attachment|folder|collection|organization|org-collection|template|fingerprint) <id> [options]
+        secret_id = terms[1]
         
         # Load configuration from kwargs or fallback to environment variables
         config = BWConfig(**kwargs)
 
         bw_cli = BitwardenCliWrapper()
 
-        bw_cli.get_secret(config.url,config.client_id,config.client_secret,config.vault_password,id,type)
+        bw_cli.get_secret(config.url,config.client_id,config.client_secret,config.vault_password,secret_id,secret_type)
 
 
