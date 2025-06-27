@@ -98,6 +98,6 @@ class LookupModule(LookupBase):
 
         bw_cli = BitwardenCliWrapper()
 
-        bw_cli.get_secret(config.url,config.client_id,config.client_secret,config.vault_password,secret_id,secret_type)
+        return bw_cli.get_secret(config.url,config.client_id,config.client_secret,config.vault_password,secret_id,secret_type)
 
 
