@@ -56,7 +56,6 @@ class BitwardenCliWrapper:
         run(['bw', 'unlock', bw_password])
 
         # Step 5: Read secret value and return it
-        # For example, the following command will create a secure note:
         # bw get (item|username|password|uri|totp|exposed|attachment|folder|collection|organization|org-collection|template|fingerprint) <id> [options]
         run(['bw', 'get', secret_type, secret_id])
         
@@ -89,7 +88,7 @@ class LookupModule(LookupBase):
         if len(terms) != 2:
             raise AnsibleError("You must provide the type and the id to lookup")
         secret_type = terms[0]
-        if type not in LookupModule.ALLOWED_LOOKUP_TYPES:
+        if secret_type not in LookupModule.ALLOWED_LOOKUP_TYPES:
             raise AnsibleError("You must provide a valid type between item|username|password|uri|totp|exposed|attachment|folder|collection|organization|org-collection|template|fingerprint")
         secret_id = terms[1]
         
