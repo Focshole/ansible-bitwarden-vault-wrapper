@@ -7,10 +7,8 @@ This project provides an **unofficial Ansible wrapper** around the [Bitwarden CL
 
 ## 📦 Installation
 
-> **Note**: This wrapper is not yet published on Ansible Galaxy (hopefully soon!). Until then, you can install it manually (assuming your working directory is in the root folder of this project):
-
 ```bash
-cp -r . ~/.ansible/collections/ansible_collections/Focshole/bitwarden_cli_wrapper
+ansible-galaxy collection install focshole.bitwarden_cli_wrapper
 ```
 
 Make sure you preserve the directory structure so Ansible can locate it correctly.
@@ -20,7 +18,7 @@ Requires to have the [Bitwarden CLI](https://bitwarden.com/help/cli/) installed 
 
 ## 🚀 Getting Started
 
-To access your Bitwarden vault, first **generate a client API key**. ⚠️ This script grants full access to your vault, so **avoid using it with shared or personal vaults**—preferably, create a dedicated vault per environment or deployment.
+To access your Bitwarden vault, first **generate a client API key**. ⚠️ This script grants full access to your vault, so **avoid using it with personal vaults**—preferably, create a dedicated vault per environment or deployment.
 
 ### 1. Export required environment variables
 
@@ -50,7 +48,7 @@ vars_prompt:
     private: yes
 
 vars:
-  a_secret_from_bitwarden: "{{ lookup('Focshole.bitwarden_cli_wrapper.lookup', 'password', '<secret_id>', vault_password) }}"
+  a_secret_from_bitwarden: "{{ lookup('focshole.ansible_bitwarden_cli_wrapper.lookup', 'password', '<secret_id>', vault_password) }}"
 
 tasks:
   - name: Show the secret
@@ -66,9 +64,9 @@ tasks:
 - Opens the vault and caches the **session key**
 - Reuses the session for subsequent lookups during the same execution
 - Parameters passed to the lookup plugin:
-  1. CLI `get` subcommand (e.g. `password`)
+  1. Bitwarden CLI `get` subcommand (e.g. `password`)
   2. ID or name of the secret
-  3. Vault password (prompted)
+  3. Vault password (much better if prompted)
 
 > 💡 Not intended for persistent background processes. Best used in interactive or CI environments.
 
