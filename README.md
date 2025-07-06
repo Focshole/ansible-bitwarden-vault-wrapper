@@ -10,7 +10,7 @@ This project provides an **unofficial Ansible wrapper** around the [Bitwarden CL
 > **Note**: This wrapper is not yet published on Ansible Galaxy (hopefully soon!). Until then, you can install it manually (assuming your working directory is in the root folder of this project):
 
 ```bash
-cp -r bitwarden_unofficial/cli_wrapper ~/.ansible/collections/ansible_collections/bitwarden_unofficial/cli_wrapper
+cp -r . ~/.ansible/collections/ansible_collections/Focshole/bitwarden_cli_wrapper
 ```
 
 Make sure you preserve the directory structure so Ansible can locate it correctly.
@@ -50,7 +50,7 @@ vars_prompt:
     private: yes
 
 vars:
-  a_secret_from_bitwarden: "{{ lookup('bitwarden_unofficial.cli_wrapper.lookup', 'password', '<secret_id>', vault_password) }}"
+  a_secret_from_bitwarden: "{{ lookup('Focshole.bitwarden_cli_wrapper.lookup', 'password', '<secret_id>', vault_password) }}"
 
 tasks:
   - name: Show the secret
