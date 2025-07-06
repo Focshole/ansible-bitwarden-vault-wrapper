@@ -8,6 +8,8 @@ from ansible.plugins.lookup import LookupBase
 from ansible.errors import AnsibleError
 from ansible.utils.display import Display
 from hashlib import sha256
+from pathlib import Path
+
 display = Display()
 
 class ExecutableException(Exception):
@@ -36,16 +38,6 @@ class ExecutableWrapper:
 
 class BitwardenCliWrapper:
     VARIABLE_KEY="BitwardenCliWrapper"
-
-    def __init__(self,variables):
-        self._bw_tmp_homes_dict, self._bw_session_cli_dict=self._get_or_create_bw_session_cli_dicts(variables)
-
-    def _get_or_create_bw_session_cli_dicts(self,variables) -> tuple[dict,dict]:
-        if BitwardenCliWrapper.VARIABLE_KEY not in variables:
-            # https://josephharding.github.io/tutorials/2024/05/01/ansible-lookup-plugins-lazy-cache.html
-            # First dict is for tmp home dir, second dict is for session keys
-            variables[BitwardenCliWrapper.VARIABLE_KEY]=(dict(),dict())
-        return variables[BitwardenCliWrapper.VARIABLE_KEY]
         
     def get_secret(
         self,
@@ -57,14 +49,17 @@ class BitwardenCliWrapper:
         secret_type: str):
         
         lookup_key=sha256(bytes(f"{bw_url}-{bw_client_id}-{bw_client_secret}-{bw_password}","utf8")).hexdigest()
-
+        display.display(f"Lookup key: {lookup_key}")
+        
+        tmp_dir=Path(os.path.join(tempfile.gettempdir(),"bitwarden_cli_wrapper", lookup_key))
         bw_env=os.environ.copy()
-        bw_env["HOME"] = self._get_tmp_home_dir(lookup_key)
+        bw_env["HOME"] = tmp_dir
         bw_env["BW_CLIENTID"] = bw_client_id
         bw_env["BW_CLIENTSECRET"] = bw_client_secret
         executable_wrapper = ExecutableWrapper(bw_env)
-
-        if lookup_key not in self._bw_session_cli_dict:
+        
+        if not tmp_dir.exists():
+            tmp_dir.mkdir(parents=True, exist_ok=True)
             display.verbose("Set url to '" + bw_url + "'")
             # Step 1: Set Bitwarden server - TODO add logging here
             executable_wrapper.run(["bw", "config", "server", bw_url])
@@ -77,37 +72,28 @@ class BitwardenCliWrapper:
             display.verbose("Syncing the vault...")
             display.display(executable_wrapper.run(["bw", "sync"]))
 
-            # Step 4: Unlock vault
-            bw_env["BW_PASSWORD"] = bw_password
-            unlock_output = executable_wrapper.run(["bw", "unlock", "--passwordenv", "BW_PASSWORD"])
-            bw_env["BW_PASSWORD"] = ""
+        # Step 4: Unlock vault
+        bw_env["BW_PASSWORD"] = bw_password
+        unlock_output = executable_wrapper.run(["bw", "unlock", "--passwordenv", "BW_PASSWORD"])
+        bw_env["BW_PASSWORD"] = ""
 
-            # Step 5: Lookup session key from output
-            regex_session_key = r'export BW_SESSION="([^"]+)"'
-            match = re.search(regex_session_key, unlock_output)
-            if match:
-                bw_session = match.group(1)
-            else:
-                raise AnsibleError(
-                    "Unlocking failed, probably a wrong vault password had been provided",
-                    obj=unlock_output,
-                    show_content=True,
-                )
-            self._bw_session_cli_dict[lookup_key] = bw_session
+        # Step 5: Lookup session key from output
+        regex_session_key = r'export BW_SESSION="([^"]+)"'
+        match = re.search(regex_session_key, unlock_output)
+        if match:
+            bw_session = match.group(1)
         else:
-            bw_session = self._bw_session_cli_dict[lookup_key]
+            raise AnsibleError(
+                "Unlocking failed, probably a wrong vault password had been provided",
+                obj=unlock_output,
+                show_content=True,
+            )
         
         # Step 5: Read secret value and return it
         # bw get (item|username|password|uri|totp|exposed|attachment|folder|collection|organization|org-collection|template|fingerprint) <id> [options]
         bw_env["BW_SESSION"]=bw_session
         secret = executable_wrapper.run(["bw", "get", secret_type, secret_id])
         return [secret]
-
-    
-    def _get_tmp_home_dir(self, lookup_key: str) -> str:
-        if lookup_key not in self._bw_tmp_homes_dict:
-            self._bw_tmp_homes_dict[lookup_key]= tempfile.TemporaryDirectory()
-        return self._bw_tmp_homes_dict[lookup_key].name
 
 class BWConfig:
     MANDATORY_PARAMETERS = ["BW_CLIENT_ID", "BW_CLIENTSECRET", "BW_GRANT_TYPE"]
@@ -163,7 +149,7 @@ class LookupModule(LookupBase):
         config = BWConfig(**kwargs)
 
         # Variables is used to track existing sessions
-        bw_cli = BitwardenCliWrapper(variables)
+        bw_cli = BitwardenCliWrapper()
 
         return bw_cli.get_secret(
             config.url,
