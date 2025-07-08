@@ -58,6 +58,9 @@ class BitwardenCliWrapper:
         lookup_key=sha256(bytes(f"{bw_url}-{bw_client_id}-{bw_client_secret}-{password_hash}","utf8")).hexdigest()
         
         tmp_dir=Path(os.path.join(tempfile.gettempdir(),"bitwarden_cli_wrapper", lookup_key))
+        if not tmp_dir.exists():
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+        
         bw_env=os.environ.copy()
         bw_env["HOME"] = tmp_dir
         bw_env["BW_CLIENTID"] = bw_client_id
@@ -65,9 +68,6 @@ class BitwardenCliWrapper:
         executable_wrapper = ExecutableWrapper(bw_env)
         
         tmp_session=Path(os.path.join(tempfile.gettempdir(),"bitwarden_cli_wrapper", lookup_key,"sessionKey"))
-
-        if not tmp_dir.exists():
-            tmp_dir.mkdir(parents=True, exist_ok=True)
 
         should_renew_session=False
 
@@ -87,7 +87,7 @@ class BitwardenCliWrapper:
         else:
             current_time = time.time()
             mod_time = os.path.getmtime(str(tmp_session.absolute()))
-            older_than_10_mins= current_time - mod_time > 30 * 60
+            older_than_30_mins= current_time - mod_time > 30 * 60
             should_renew_session=older_than_30_mins
             # TODO TRY LOCKING THE SESSION IF OLDER BEFORE RENEWING
 
@@ -125,7 +125,7 @@ class BitwardenCliWrapper:
                 ciphertext = file_data[16:]    # Rest is the ciphertext
 
             # Decrypt
-            cipher = AES.new(key, AES.MODE_CBC, iv)
+            cipher = AES.new(bw_password, AES.MODE_CBC, iv)
             bw_session = unpad(cipher.decrypt(ciphertext), AES.block_size)
 
                     # Step 5: Read secret value and return it
