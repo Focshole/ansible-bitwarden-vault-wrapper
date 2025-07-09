@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import tempfile
+import hashlib
 import time
 
 from ansible.plugins.lookup import LookupBase
@@ -91,6 +92,8 @@ class BitwardenCliWrapper:
             should_renew_session=older_than_30_mins
             # TODO TRY LOCKING THE SESSION IF OLDER BEFORE RENEWING
 
+
+        aes_password=hashlib.sha256(bw_password.encode()).digest()
         if should_renew_session:
             # Step 4: Unlock vault
             bw_env["BW_PASSWORD"] = bw_password
@@ -113,7 +116,7 @@ class BitwardenCliWrapper:
             iv = get_random_bytes(16)
 
             # Encrypt using AES-256-GCM
-            cipher = AES.new(bw_password, AES.MODE_GCM, iv)
+            cipher = AES.new(aes_password, AES.MODE_GCM, iv)
             ciphertext = cipher.encrypt(pad(bw_session.encode(), AES.block_size))
             # Write to file
             with open(str(tmp_session.absolute()), "wb") as f:
@@ -125,7 +128,7 @@ class BitwardenCliWrapper:
                 ciphertext = file_data[16:]    # Rest is the ciphertext
 
             # Decrypt
-            cipher = AES.new(bw_password, AES.MODE_GCM, iv)
+            cipher = AES.new(aes_password, AES.MODE_GCM, iv)
             bw_session = unpad(cipher.decrypt(ciphertext), AES.block_size)
 
                     # Step 5: Read secret value and return it
