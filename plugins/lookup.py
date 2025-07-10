@@ -80,11 +80,11 @@ class BitwardenCliWrapper:
 
             display.verbose("Logging in using api key")
             # Step 2: Log in using the API key (client ID/secret)
-            display.display(executable_wrapper.run(["bw", "login", "--apikey"]))
+            display.verbose(executable_wrapper.run(["bw", "login", "--apikey"]))
 
             # Step 3: Sync
             display.verbose("Syncing the vault...")
-            display.display(executable_wrapper.run(["bw", "sync"]))
+            display.verbose(executable_wrapper.run(["bw", "sync"]))
             should_renew_session=True
         else:
             current_time = time.time()
@@ -137,6 +137,7 @@ class BitwardenCliWrapper:
                     # Step 5: Read secret value and return it
         # bw get (item|username|password|uri|totp|exposed|attachment|folder|collection|organization|org-collection|template|fingerprint) <id> [options]
         bw_env["BW_SESSION"]=bw_session
+        display.verbose(f"Running get {secret_type, secret_id}")
         secret = executable_wrapper.run(["bw", "get", secret_type, secret_id])
         return [secret]
 
@@ -178,6 +179,7 @@ class LookupModule(LookupBase):
     ]
 
     def run(self, terms, variables=None, **kwargs):
+        start = time.perf_counter()
         if len(terms) != 3:
             raise AnsibleError(
                 "You must provide the type, id to lookup and the vault password"
@@ -196,7 +198,7 @@ class LookupModule(LookupBase):
         # Variables is used to track existing sessions
         bw_cli = BitwardenCliWrapper()
 
-        return bw_cli.get_secret(
+        secret= bw_cli.get_secret(
             config.url,
             config.client_id,
             config.client_secret,
@@ -204,3 +206,7 @@ class LookupModule(LookupBase):
             secret_id,
             secret_type,
         )
+
+        time_elapsed = time.perf_counter() - start
+        display.verbose(f"Time taken to retrieve the secret: {time_elapsed:.4f}s")
+        return secret
