@@ -15,7 +15,6 @@ from pathlib import Path
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import pad
-
 from Crypto.Util.Padding import unpad
 
 display = Display()
@@ -86,17 +85,7 @@ class BitwardenCliWrapper:
         should_renew_session = False
 
         if not tmp_session_file.exists():
-            display.verbose("Set url to '" + bw_url + "'")
-            # Step 1: Set Bitwarden server - TODO add logging here
-            executable_wrapper.run(["bw", "config", "server", bw_url])
-
-            display.verbose("Logging in using api key")
-            # Step 2: Log in using the API key (client ID/secret)
-            display.verbose(executable_wrapper.run(["bw", "login", "--apikey"]))
-
-            # Step 3: Sync
-            display.verbose("Syncing the vault...")
-            display.verbose(executable_wrapper.run(["bw", "sync"]))
+            self._initialize_bw_session_directory(executable_wrapper, bw_url)
             should_renew_session = True
         else:
             current_time = time.time()
@@ -107,53 +96,86 @@ class BitwardenCliWrapper:
         aes_password = hashlib.sha256(bw_password.encode()).digest()
         if should_renew_session:
             if tmp_session_file.exists():
-                display.verbose("Locking the vault...")
-                executable_wrapper.run(["bw", "lock"])
+                display.verbose("Locking the vault before renewing session...")
+                display.verbose(executable_wrapper.run(["bw", "lock"]))
 
-            # Step 4: Unlock vault
-            bw_env["BW_PASSWORD"] = bw_password
-            unlock_output = executable_wrapper.run(
-                ["bw", "unlock", "--passwordenv", "BW_PASSWORD"]
-            )
-            bw_env["BW_PASSWORD"] = ""
+            # Step 4: Unlock vault to get session
+            bw_session=self._unlock_vault(executable_wrapper, bw_env, bw_password)
 
-            # Step 5: Lookup session key from output
-            regex_session_key = r'export BW_SESSION="([^"]+)"'
-            match = re.search(regex_session_key, unlock_output)
-            if match:
-                bw_session = match.group(1)
-            else:
-                raise AnsibleError(
-                    "Unlocking failed, probably a wrong vault password had been provided",
-                    obj=unlock_output,
-                    show_content=True,
-                )
-
-            # Generate a random IV
-            iv = get_random_bytes(16)
-
-            # Encrypt using AES-256-GCM
-            cipher = AES.new(aes_password, AES.MODE_GCM, iv)
-            ciphertext = cipher.encrypt(pad(bw_session.encode(), AES.block_size))
-            # Write to file
-            with open(str(tmp_session_file.absolute()), "wb") as f:
-                f.write(iv + ciphertext)  # Store IV + ciphertext together
+            self._store_and_encrypt(aes_password,bw_session,tmp_session_file)
+            
         else:
-            with open(str(tmp_session_file.absolute()), "rb") as f:
-                file_data = f.read()
-                iv = file_data[:16]  # Extract the IV (first 16 bytes)
-                ciphertext = file_data[16:]  # Rest is the ciphertext
+            bw_session= self._load_and_decrypt(aes_password,tmp_session_file)
 
-            # Decrypt
-            cipher = AES.new(aes_password, AES.MODE_GCM, iv)
-            bw_session = unpad(cipher.decrypt(ciphertext), AES.block_size)
-
-            # Step 5: Read secret value and return it
+        # Step 5: Read secret value and return it
         # bw get (item|username|password|uri|totp|exposed|attachment|folder|collection|organization|org-collection|template|fingerprint) <id> [options]
         bw_env["BW_SESSION"] = bw_session
         display.verbose(f"Running get {secret_type, secret_id}")
         secret = executable_wrapper.run(["bw", "get", secret_type, secret_id])
+        bw_env["BW_SESSION"] = ""
         return [secret]
+
+    def _initialize_bw_session_directory(
+        self, executable_wrapper: ExecutableWrapper, bw_url: str
+    ):
+
+        display.verbose("Set url to '" + bw_url + "'")
+        display.verbose(executable_wrapper.run(["bw", "config", "server", bw_url]))
+
+        display.display("Logging in using api key...")
+        # Step 2: Log in using the API key (client ID/secret)
+        display.verbose(executable_wrapper.run(["bw", "login", "--apikey"]))
+
+        # Step 3: Sync
+        display.display("Syncing the vault...")
+        display.verbose(executable_wrapper.run(["bw", "sync"]))
+
+    def _unlock_vault(
+        self,
+        executable_wrapper: ExecutableWrapper,
+        bw_env: dict[str, str],
+        bw_password: str,
+    ) -> str:
+
+        bw_env["BW_PASSWORD"] = bw_password
+        unlock_output = executable_wrapper.run(
+            ["bw", "unlock", "--passwordenv", "BW_PASSWORD"]
+        )
+        bw_env["BW_PASSWORD"] = ""
+
+        regex_session_key = r'export BW_SESSION="([^"]+)"'
+        match = re.search(regex_session_key, unlock_output)
+        if match:
+            bw_session = match.group(1)
+        else:
+            raise AnsibleError(
+                "Unlocking failed, probably a wrong vault password had been provided",
+                obj=unlock_output,
+                show_content=True,
+            )
+        return bw_session
+    
+    def _store_and_encrypt(self, key: str, payload: str, file_path: Path):
+        iv = get_random_bytes(16)
+
+        # Encrypt using AES-256-GCM
+        cipher = AES.new(key, AES.MODE_GCM, iv)
+        ciphertext = cipher.encrypt(pad(payload.encode(), AES.block_size))
+        # Write to file
+        with open(str(file_path.absolute()), "wb") as f:
+            f.write(iv + ciphertext)  # Store IV + ciphertext together
+    
+    def _load_and_decrypt(self, key: str, file_path: Path):
+
+        with open(str(file_path.absolute()), "rb") as f:
+            file_data = f.read()
+            iv = file_data[:16]  # Extract the IV (first 16 bytes)
+            ciphertext = file_data[16:]  # Rest is the ciphertext
+
+        # Decrypt
+        cipher = AES.new(key, AES.MODE_GCM, iv)
+        return unpad(cipher.decrypt(ciphertext), AES.block_size)
+
 
 
 class BWConfig:
