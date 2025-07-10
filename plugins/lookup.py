@@ -57,22 +57,23 @@ class BitwardenCliWrapper:
         
         password_hash=sha256(bytes(bw_password,"utf8")).hexdigest()
         lookup_key=sha256(bytes(f"{bw_url}-{bw_client_id}-{bw_client_secret}-{password_hash}","utf8")).hexdigest()
-        
-        tmp_dir=Path(os.path.join(tempfile.gettempdir(),"bitwarden_cli_wrapper", lookup_key))
-        if not tmp_dir.exists():
-            tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        tmp_dir=tempfile.gettempdir()
+        tmp_session_dir=Path(os.path.join(tmp_dir,"bitwarden_cli_wrapper", lookup_key))
+        tmp_session_file=Path(os.path.join(tmp_dir,"bitwarden_cli_wrapper", lookup_key,"sessionKey"))
+
+        if not tmp_session_dir.exists():
+            tmp_session_dir.mkdir(parents=True, exist_ok=True)
         
         bw_env=os.environ.copy()
-        bw_env["HOME"] = tmp_dir
+        bw_env["HOME"] = tmp_session_dir
         bw_env["BW_CLIENTID"] = bw_client_id
         bw_env["BW_CLIENTSECRET"] = bw_client_secret
         executable_wrapper = ExecutableWrapper(bw_env)
         
-        tmp_session=Path(os.path.join(tempfile.gettempdir(),"bitwarden_cli_wrapper", lookup_key,"sessionKey"))
-
         should_renew_session=False
 
-        if not tmp_session.exists():
+        if not tmp_session_file.exists():
             display.verbose("Set url to '" + bw_url + "'")
             # Step 1: Set Bitwarden server - TODO add logging here
             executable_wrapper.run(["bw", "config", "server", bw_url])
@@ -87,14 +88,16 @@ class BitwardenCliWrapper:
             should_renew_session=True
         else:
             current_time = time.time()
-            mod_time = os.path.getmtime(str(tmp_session.absolute()))
+            mod_time = os.path.getmtime(str(tmp_session_file.absolute()))
             older_than_30_mins= current_time - mod_time > 30 * 60
             should_renew_session=older_than_30_mins
-            # TODO TRY LOCKING THE SESSION IF OLDER BEFORE RENEWING
-
 
         aes_password=hashlib.sha256(bw_password.encode()).digest()
         if should_renew_session:
+            if tmp_session_file.exists():
+                display.verbose("Locking the vault...")
+                executable_wrapper.run(["bw", "lock"])
+
             # Step 4: Unlock vault
             bw_env["BW_PASSWORD"] = bw_password
             unlock_output = executable_wrapper.run(["bw", "unlock", "--passwordenv", "BW_PASSWORD"])
@@ -119,10 +122,10 @@ class BitwardenCliWrapper:
             cipher = AES.new(aes_password, AES.MODE_GCM, iv)
             ciphertext = cipher.encrypt(pad(bw_session.encode(), AES.block_size))
             # Write to file
-            with open(str(tmp_session.absolute()), "wb") as f:
+            with open(str(tmp_session_file.absolute()), "wb") as f:
                 f.write(iv + ciphertext)  # Store IV + ciphertext together
         else:
-            with open(str(tmp_session.absolute()), "rb") as f:
+            with open(str(tmp_session_file.absolute()), "rb") as f:
                 file_data = f.read()
                 iv = file_data[:16]            # Extract the IV (first 16 bytes)
                 ciphertext = file_data[16:]    # Rest is the ciphertext
