@@ -17,17 +17,20 @@ from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import pad
 
 from Crypto.Util.Padding import unpad
+
 display = Display()
+
 
 class ExecutableException(Exception):
     def __init__(self, *args):
         super().__init__(*args)
 
+
 class ExecutableWrapper:
-    def __init__(self, env:dict[str,str]):
+    def __init__(self, env: dict[str, str]):
         self._env = env
-    
-    def run(self, command:str, **kwargs):
+
+    def run(self, command: str, **kwargs):
         try:
             result = subprocess.run(
                 command,
@@ -40,12 +43,14 @@ class ExecutableWrapper:
             )
             return result.stdout.strip()
         except subprocess.CalledProcessError as e:
-            raise ExecutableException(f"Command failed: '{'\' \''.join(command)}\n{e.stderr.strip()}'",e)
+            raise ExecutableException(
+                f"Command failed: '{'\' \''.join(command)}\n{e.stderr.strip()}'", e
+            )
 
 
 class BitwardenCliWrapper:
-    VARIABLE_KEY="BitwardenCliWrapper"
-        
+    VARIABLE_KEY = "BitwardenCliWrapper"
+
     def get_secret(
         self,
         bw_url: str,
@@ -53,25 +58,32 @@ class BitwardenCliWrapper:
         bw_client_secret: str,
         bw_password: str,
         secret_id: str,
-        secret_type: str): 
-        
-        password_hash=sha256(bytes(bw_password,"utf8")).hexdigest()
-        lookup_key=sha256(bytes(f"{bw_url}-{bw_client_id}-{bw_client_secret}-{password_hash}","utf8")).hexdigest()
+        secret_type: str,
+    ):
 
-        tmp_dir=tempfile.gettempdir()
-        tmp_session_dir=Path(os.path.join(tmp_dir,"bitwarden_cli_wrapper", lookup_key))
-        tmp_session_file=Path(os.path.join(tmp_dir,"bitwarden_cli_wrapper", lookup_key,"sessionKey"))
+        password_hash = sha256(bytes(bw_password, "utf8")).hexdigest()
+        lookup_key = sha256(
+            bytes(f"{bw_url}-{bw_client_id}-{bw_client_secret}-{password_hash}", "utf8")
+        ).hexdigest()
+
+        tmp_dir = tempfile.gettempdir()
+        tmp_session_dir = Path(
+            os.path.join(tmp_dir, "bitwarden_cli_wrapper", lookup_key)
+        )
+        tmp_session_file = Path(
+            os.path.join(tmp_dir, "bitwarden_cli_wrapper", lookup_key, "sessionKey")
+        )
 
         if not tmp_session_dir.exists():
             tmp_session_dir.mkdir(parents=True, exist_ok=True)
-        
-        bw_env=os.environ.copy()
+
+        bw_env = os.environ.copy()
         bw_env["HOME"] = tmp_session_dir
         bw_env["BW_CLIENTID"] = bw_client_id
         bw_env["BW_CLIENTSECRET"] = bw_client_secret
         executable_wrapper = ExecutableWrapper(bw_env)
-        
-        should_renew_session=False
+
+        should_renew_session = False
 
         if not tmp_session_file.exists():
             display.verbose("Set url to '" + bw_url + "'")
@@ -85,14 +97,14 @@ class BitwardenCliWrapper:
             # Step 3: Sync
             display.verbose("Syncing the vault...")
             display.verbose(executable_wrapper.run(["bw", "sync"]))
-            should_renew_session=True
+            should_renew_session = True
         else:
             current_time = time.time()
             mod_time = os.path.getmtime(str(tmp_session_file.absolute()))
-            older_than_30_mins= current_time - mod_time > 30 * 60
-            should_renew_session=older_than_30_mins
+            older_than_30_mins = current_time - mod_time > 30 * 60
+            should_renew_session = older_than_30_mins
 
-        aes_password=hashlib.sha256(bw_password.encode()).digest()
+        aes_password = hashlib.sha256(bw_password.encode()).digest()
         if should_renew_session:
             if tmp_session_file.exists():
                 display.verbose("Locking the vault...")
@@ -100,7 +112,9 @@ class BitwardenCliWrapper:
 
             # Step 4: Unlock vault
             bw_env["BW_PASSWORD"] = bw_password
-            unlock_output = executable_wrapper.run(["bw", "unlock", "--passwordenv", "BW_PASSWORD"])
+            unlock_output = executable_wrapper.run(
+                ["bw", "unlock", "--passwordenv", "BW_PASSWORD"]
+            )
             bw_env["BW_PASSWORD"] = ""
 
             # Step 5: Lookup session key from output
@@ -114,7 +128,7 @@ class BitwardenCliWrapper:
                     obj=unlock_output,
                     show_content=True,
                 )
-            
+
             # Generate a random IV
             iv = get_random_bytes(16)
 
@@ -127,19 +141,20 @@ class BitwardenCliWrapper:
         else:
             with open(str(tmp_session_file.absolute()), "rb") as f:
                 file_data = f.read()
-                iv = file_data[:16]            # Extract the IV (first 16 bytes)
-                ciphertext = file_data[16:]    # Rest is the ciphertext
+                iv = file_data[:16]  # Extract the IV (first 16 bytes)
+                ciphertext = file_data[16:]  # Rest is the ciphertext
 
             # Decrypt
             cipher = AES.new(aes_password, AES.MODE_GCM, iv)
             bw_session = unpad(cipher.decrypt(ciphertext), AES.block_size)
 
-                    # Step 5: Read secret value and return it
+            # Step 5: Read secret value and return it
         # bw get (item|username|password|uri|totp|exposed|attachment|folder|collection|organization|org-collection|template|fingerprint) <id> [options]
-        bw_env["BW_SESSION"]=bw_session
+        bw_env["BW_SESSION"] = bw_session
         display.verbose(f"Running get {secret_type, secret_id}")
         secret = executable_wrapper.run(["bw", "get", secret_type, secret_id])
         return [secret]
+
 
 class BWConfig:
     MANDATORY_PARAMETERS = ["BW_CLIENT_ID", "BW_CLIENTSECRET", "BW_GRANT_TYPE"]
@@ -198,7 +213,7 @@ class LookupModule(LookupBase):
         # Variables is used to track existing sessions
         bw_cli = BitwardenCliWrapper()
 
-        secret= bw_cli.get_secret(
+        secret = bw_cli.get_secret(
             config.url,
             config.client_id,
             config.client_secret,
