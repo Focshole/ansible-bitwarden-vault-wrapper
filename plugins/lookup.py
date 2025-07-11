@@ -14,8 +14,6 @@ from pathlib import Path
 
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
-from Crypto.Util.Padding import pad
-from Crypto.Util.Padding import unpad
 
 display = Display()
 
@@ -23,6 +21,37 @@ display = Display()
 class ExecutableException(Exception):
     def __init__(self, *args):
         super().__init__(*args)
+
+
+class CryptoUtils:
+    def encrypt(key: bytes, payload: str) -> bytes:
+        iv = get_random_bytes(16)
+
+        # Encrypt using AES-256-GCM
+        cipher = AES.new(key, AES.MODE_GCM, iv)
+        ciphertext, tag = cipher.encrypt_and_digest(payload.encode("utf8"))
+        return iv + tag + ciphertext
+
+    def store_and_encrypt(key: bytes, payload: str, file_path: Path):
+        ciphertext = CryptoUtils.encrypt(key, payload)
+        # Write to file
+        with open(str(file_path.absolute()), "wb") as f:
+            f.write(ciphertext)  # Store IV + tag + ciphertext together
+
+    def decrypt(full_ciphertext: bytes, key: bytes) -> str:
+        iv = full_ciphertext[:16]
+        tag = full_ciphertext[16:32]
+        ciphertext = full_ciphertext[32:]
+        cipher = AES.new(key, AES.MODE_GCM, iv)
+        plaintext = cipher.decrypt(ciphertext).decode()
+        cipher.verify(tag)
+        return plaintext
+
+    def load_and_decrypt(key: bytes, file_path: Path) -> str:
+        with open(str(file_path.absolute()), "rb") as f:
+            ciphertext = f.read()  # Rest is the ciphertext
+
+        return CryptoUtils.decrypt(ciphertext, key)
 
 
 class ExecutableWrapper:
@@ -67,10 +96,10 @@ class BitwardenCliWrapper:
 
         tmp_dir = tempfile.gettempdir()
         tmp_session_dir = Path(
-            os.path.join(tmp_dir, "bitwarden_cli_wrapper", lookup_key)
+            os.path.join(tmp_dir, f"bitwarden_cli_wrapper-{lookup_key}", )
         )
         tmp_session_file = Path(
-            os.path.join(tmp_dir, "bitwarden_cli_wrapper", lookup_key, "sessionKey")
+            os.path.join(tmp_dir, f"bitwarden_cli_wrapper-{lookup_key}", "sessionKey")
         )
 
         if not tmp_session_dir.exists():
@@ -100,12 +129,12 @@ class BitwardenCliWrapper:
                 display.verbose(executable_wrapper.run(["bw", "lock"]))
 
             # Step 4: Unlock vault to get session
-            bw_session=self._unlock_vault(executable_wrapper, bw_env, bw_password)
+            bw_session = self._unlock_vault(executable_wrapper, bw_env, bw_password)
 
-            self._store_and_encrypt(aes_password,bw_session,tmp_session_file)
-            
+            CryptoUtils.store_and_encrypt(aes_password, bw_session, tmp_session_file)
+
         else:
-            bw_session= self._load_and_decrypt(aes_password,tmp_session_file)
+            bw_session = CryptoUtils.load_and_decrypt(aes_password, tmp_session_file)
 
         # Step 5: Read secret value and return it
         # bw get (item|username|password|uri|totp|exposed|attachment|folder|collection|organization|org-collection|template|fingerprint) <id> [options]
@@ -113,7 +142,7 @@ class BitwardenCliWrapper:
         display.verbose(f"Running get {secret_type, secret_id}")
         secret = executable_wrapper.run(["bw", "get", secret_type, secret_id])
         bw_env["BW_SESSION"] = ""
-        return [secret]
+        return secret
 
     def _initialize_bw_session_directory(
         self, executable_wrapper: ExecutableWrapper, bw_url: str
@@ -122,12 +151,12 @@ class BitwardenCliWrapper:
         display.verbose("Set url to '" + bw_url + "'")
         display.verbose(executable_wrapper.run(["bw", "config", "server", bw_url]))
 
-        display.display("Logging in using api key...")
+        display.display(f"Authenticating with api keys to {bw_url}...")
         # Step 2: Log in using the API key (client ID/secret)
         display.verbose(executable_wrapper.run(["bw", "login", "--apikey"]))
 
         # Step 3: Sync
-        display.display("Syncing the vault...")
+        display.display("Authentication successful. Syncing the vault...")
         display.verbose(executable_wrapper.run(["bw", "sync"]))
 
     def _unlock_vault(
@@ -138,10 +167,12 @@ class BitwardenCliWrapper:
     ) -> str:
 
         bw_env["BW_PASSWORD"] = bw_password
+        display.display("Unlocking the vault with the master password...")
         unlock_output = executable_wrapper.run(
             ["bw", "unlock", "--passwordenv", "BW_PASSWORD"]
         )
         bw_env["BW_PASSWORD"] = ""
+        display.display(f"Vault successfully unlocked! To safely logout, please remove '{bw_env["HOME"]}' after execution.")
 
         regex_session_key = r'export BW_SESSION="([^"]+)"'
         match = re.search(regex_session_key, unlock_output)
@@ -149,33 +180,11 @@ class BitwardenCliWrapper:
             bw_session = match.group(1)
         else:
             raise AnsibleError(
-                "Unlocking failed, probably a wrong vault password had been provided",
+                "Cannot find the session key in command output, probably a wrong vault password had been provided",
                 obj=unlock_output,
                 show_content=True,
             )
         return bw_session
-    
-    def _store_and_encrypt(self, key: str, payload: str, file_path: Path):
-        iv = get_random_bytes(16)
-
-        # Encrypt using AES-256-GCM
-        cipher = AES.new(key, AES.MODE_GCM, iv)
-        ciphertext = cipher.encrypt(pad(payload.encode(), AES.block_size))
-        # Write to file
-        with open(str(file_path.absolute()), "wb") as f:
-            f.write(iv + ciphertext)  # Store IV + ciphertext together
-    
-    def _load_and_decrypt(self, key: str, file_path: Path):
-
-        with open(str(file_path.absolute()), "rb") as f:
-            file_data = f.read()
-            iv = file_data[:16]  # Extract the IV (first 16 bytes)
-            ciphertext = file_data[16:]  # Rest is the ciphertext
-
-        # Decrypt
-        cipher = AES.new(key, AES.MODE_GCM, iv)
-        return unpad(cipher.decrypt(ciphertext), AES.block_size)
-
 
 
 class BWConfig:
@@ -215,6 +224,31 @@ class LookupModule(LookupBase):
         "fingerprint",
     ]
 
+    def _try_variables_lookup_and_decrypt(
+        self,
+        variables,
+        lookup_key: str,
+        encryption_key: bytes,
+    ) -> str | None:
+        if lookup_key in variables:
+            # Using https://josephharding.github.io/tutorials/2024/05/01/ansible-lookup-plugins-lazy-cache.html
+            # If a secret is already there, decrypt it using the master key
+            ciphertext = variables[lookup_key]
+            return CryptoUtils.decrypt(ciphertext, encryption_key)
+        return None
+
+    def _store_in_variable_and_encrypt(
+        self,
+        variables,
+        lookup_key: str,
+        encryption_key: bytes,
+        secret: str,
+    ) -> None:
+        ciphertext = CryptoUtils.encrypt(encryption_key, secret)
+        # See https://josephharding.github.io/tutorials/2024/05/01/ansible-lookup-plugins-lazy-cache.html
+        # We store it encrypted with the master key to save it on consecutive lookups
+        variables[lookup_key] = ciphertext
+
     def run(self, terms, variables=None, **kwargs):
         start = time.perf_counter()
         if len(terms) != 3:
@@ -228,22 +262,34 @@ class LookupModule(LookupBase):
             )
         secret_id = terms[1]
         vault_password = terms[2]
-
         # Load configuration from kwargs or fallback to environment variables
         config = BWConfig(**kwargs)
 
-        # Variables is used to track existing sessions
-        bw_cli = BitwardenCliWrapper()
-
-        secret = bw_cli.get_secret(
-            config.url,
-            config.client_id,
-            config.client_secret,
-            vault_password,
-            secret_id,
-            secret_type,
+        lookup_key = hashlib.sha256(
+            f"{config.url}-{config.client_id}-{config.client_secret}-{vault_password}-{secret_id}-{secret_type}".encode()
+        ).hexdigest()
+        encryption_key = hashlib.sha256(vault_password.encode()).digest()
+        secret = self._try_variables_lookup_and_decrypt(
+            variables, lookup_key, encryption_key
         )
+
+        if secret is None:
+
+            # Variables is used to track existing sessions
+            bw_cli = BitwardenCliWrapper()
+
+            secret = bw_cli.get_secret(
+                config.url,
+                config.client_id,
+                config.client_secret,
+                vault_password,
+                secret_id,
+                secret_type,
+            )
+            self._store_in_variable_and_encrypt(
+                variables, lookup_key, encryption_key, secret
+            )
 
         time_elapsed = time.perf_counter() - start
         display.verbose(f"Time taken to retrieve the secret: {time_elapsed:.4f}s")
-        return secret
+        return [secret]
