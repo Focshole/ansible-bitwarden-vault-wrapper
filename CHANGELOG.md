@@ -25,3 +25,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release of the `bitwarden_cli_wrapper` Ansible collection.
 - Added lookup.py to retrieve secrets using `bw` CLI commands.
 - Documentation in `README.md` for usage and setup.
+
+[1.1.0]: https://github.com/Focshole/ansible-bitwarden-vault-wrapper/compare/v1.1.0...v1.0.0
+[1.0.0]: https://github.com/Focshole/ansible-bitwarden-vault-wrapper/compare/v1.0.0...main
