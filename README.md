@@ -12,7 +12,10 @@ ansible-galaxy collection install focshole.bitwarden_cli_wrapper
 ```
 
 Make sure you preserve the directory structure so Ansible can locate it correctly.
-Requires to have the [Bitwarden CLI](https://bitwarden.com/help/cli/) installed and reachable from `$PATH`
+Requires :
+
+- [Bitwarden CLI](https://bitwarden.com/help/cli/) installed and reachable from `$PATH`
+- [Pycryptodome](https://pycryptodome.readthedocs.io/en/latest/src/introduction.html) installed
 
 ---
 
