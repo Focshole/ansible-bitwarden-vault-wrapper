@@ -70,8 +70,7 @@ tasks:
   1. Bitwarden CLI `get` subcommand (e.g. `password`)
   2. ID or name of the secret
   3. Vault password (much better if prompted)
-
-> 💡 Not intended for persistent background processes. Best used in interactive or CI environments.
+- Any retrieved secret will be cached in `variables` object for reuse in subsequent lookups within a single task. The value is encrypted using the vault master key
 
 ---
 
